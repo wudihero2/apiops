@@ -1,8 +1,7 @@
-import asyncio
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..auth import verify_api_key, get_actor, get_source_ip
@@ -18,6 +17,7 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 @router.post("/jobs/pg-rebuild")
 async def create_pg_rebuild_job(
     body: PgRebuildRequest,
+    background_tasks: BackgroundTasks,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -35,6 +35,8 @@ async def create_pg_rebuild_job(
         params=body.dict(),
         actor=get_actor(request),
         source_ip=get_source_ip(request),
+        retry_count=0,
+        max_retries=body.max_retries,
     )
     db.add(job)
     db.commit()
@@ -56,8 +58,8 @@ async def create_pg_rebuild_job(
         db.add(s)
     db.commit()
 
-    # 背景執行 job
-    asyncio.create_task(run_pg_rebuild_job(job_id))
+    # 使用 BackgroundTasks 執行背景 job
+    background_tasks.add_task(run_pg_rebuild_job, job_id)
 
     return {"job_id": job_id}
 
@@ -82,6 +84,8 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
         created_at=job.created_at,
         finished_at=job.finished_at,
         params=job.params,
+        retry_count=job.retry_count,
+        max_retries=job.max_retries,
         steps=[
             JobStepOut(
                 name=s.name,
@@ -94,3 +98,44 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
             for s in steps
         ],
     )
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """手動重試失敗的 Job"""
+    job: OpsJob | None = db.query(OpsJob).filter_by(job_id=job_id).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    if job.status not in ["failed", "pending"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cannot retry job with status '{job.status}'"
+        )
+
+    if job.retry_count >= job.max_retries:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max retries ({job.max_retries}) exceeded"
+        )
+
+    # 增加重試次數並重新執行
+    job.retry_count += 1
+    job.status = "pending"
+    job.finished_at = None
+    db.commit()
+
+    # 重新提交背景任務
+    background_tasks.add_task(run_pg_rebuild_job, job_id)
+
+    return {
+        "message": "job retry scheduled",
+        "job_id": job_id,
+        "retry_count": job.retry_count,
+        "max_retries": job.max_retries,
+    }

@@ -18,7 +18,15 @@ def gen_job_id(job_type: str) -> str:
     return f"{now_utc().isoformat()}_{job_type}_{uuid.uuid4().hex[:8]}"
 
 
-async def run_pg_rebuild_job(job_id: str):
+def run_pg_rebuild_job(job_id: str):
+    """
+    同步包裝函數，用於 FastAPI BackgroundTasks。
+    在新的 event loop 中執行 async job。
+    """
+    asyncio.run(_run_pg_rebuild_job_async(job_id))
+
+
+async def _run_pg_rebuild_job_async(job_id: str):
     """
     背景執行 PG rebuild 流程：
     1. scale sts -> 0
@@ -26,6 +34,8 @@ async def run_pg_rebuild_job(job_id: str):
     3. delete 對應 PVC
     4. scale sts -> target_replicas
     5. 等 pod ready
+
+    支援自動重試：從失敗步驟繼續執行
     """
     db: Session = SessionLocal()
     try:
@@ -42,6 +52,13 @@ async def run_pg_rebuild_job(job_id: str):
 
         if ns not in settings.ALLOWED_NAMESPACES:
             raise RuntimeError(f"namespace {ns} not allowed")
+
+        # 查詢已完成的步驟（用於重試時跳過）
+        completed_steps = {
+            s.name for s in db.query(OpsJobStep)
+            .filter_by(job_id=job_id, status="success")
+            .all()
+        }
 
         async def run_step(step_name: str, func):
             step: OpsJobStep = (
@@ -146,11 +163,17 @@ async def run_pg_rebuild_job(job_id: str):
                 await asyncio.sleep(5)
             raise RuntimeError("timeout waiting pods ready")
 
-        await run_step("scale_sts_to_zero", step_scale_to_zero)
-        await run_step("wait_pods_down", step_wait_pods_down)
-        await run_step("delete_pvc", step_delete_pvc)
-        await run_step("scale_sts_to_target", step_scale_to_target)
-        await run_step("wait_pods_ready", step_wait_pods_ready)
+        # 執行步驟（跳過已成功的步驟）
+        if "scale_sts_to_zero" not in completed_steps:
+            await run_step("scale_sts_to_zero", step_scale_to_zero)
+        if "wait_pods_down" not in completed_steps:
+            await run_step("wait_pods_down", step_wait_pods_down)
+        if "delete_pvc" not in completed_steps:
+            await run_step("delete_pvc", step_delete_pvc)
+        if "scale_sts_to_target" not in completed_steps:
+            await run_step("scale_sts_to_target", step_scale_to_target)
+        if "wait_pods_ready" not in completed_steps:
+            await run_step("wait_pods_ready", step_wait_pods_ready)
 
         job.status = "success"
         job.finished_at = now_utc()
@@ -158,5 +181,24 @@ async def run_pg_rebuild_job(job_id: str):
 
     except Exception as e:
         print(f"[job {job_id}] error: {e}")
+
+        # 自動重試邏輯
+        if job.retry_count < job.max_retries:
+            job.retry_count += 1
+            job.status = "pending"
+            db.commit()
+            db.close()
+
+            print(f"[job {job_id}] retrying... (attempt {job.retry_count}/{job.max_retries})")
+
+            # 等待 2 秒後重試
+            await asyncio.sleep(2)
+            await _run_pg_rebuild_job_async(job_id)
+        else:
+            # 達到最大重試次數
+            print(f"[job {job_id}] max retries exceeded")
+            job.status = "failed"
+            job.finished_at = now_utc()
+            db.commit()
     finally:
         db.close()

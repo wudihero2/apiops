@@ -2,6 +2,13 @@
 
 Kubernetes 運維 API 服務，提供安全且可審計的 K8s 資源操作介面。
 
+## 🔒 安全須知
+
+- **開發環境**: `k8s/local/` 目錄包含僅供本地開發的測試密碼，絕不可用於生產環境
+- **生產環境**: 必須使用 Vault 管理 secrets，使用強密碼（至少 32 字元）
+- **密碼外露**: 本 repo 不包含任何真實密碼，所有硬編碼密碼都僅供本地測試
+- **安全審計**: 詳見 [SECURITY_AUDIT.md](SECURITY_AUDIT.md)
+
 ## 特色功能
 
 ### 1. 原子級操作 API
@@ -25,6 +32,8 @@ Kubernetes 運維 API 服務，提供安全且可審計的 K8s 資源操作介�
 - **異步執行**: 背景處理長時間任務
 - **步驟追蹤**: 每個 job 包含多個 step，可獨立追蹤狀態
 - **進度查詢**: 透過 API 查詢 job 執行進度
+- **自動重試**: Job 失敗時自動重試，從失敗步驟繼續執行（預設 3 次）
+- **手動重試**: 透過 API 或 CLI 手動觸發重試
 
 **範例 Job: PostgreSQL Rebuild**
 
@@ -158,7 +167,8 @@ X-API-Key: xxx
   "namespace": "prod",
   "statefulset": "postgres",
   "ordinal": 0,
-  "target_replicas": 1
+  "target_replicas": 1,
+  "max_retries": 3  # 可選，預設 3
 }
 
 # Response
@@ -181,6 +191,8 @@ X-API-Key: xxx
   "created_at": "2025-01-15T10:30:00Z",
   "finished_at": null,
   "params": {...},
+  "retry_count": 0,
+  "max_retries": 3,
   "steps": [
     {
       "name": "scale_sts_to_zero",
@@ -192,6 +204,21 @@ X-API-Key: xxx
     },
     ...
   ]
+}
+```
+
+#### 手動重試 Job
+
+```bash
+POST /ops/jobs/{job_id}/retry
+X-API-Key: xxx
+
+# Response
+{
+  "message": "job retry scheduled",
+  "job_id": "...",
+  "retry_count": 1,
+  "max_retries": 3
 }
 ```
 
@@ -290,28 +317,45 @@ CREATE TABLE ops_job_step (
 
 ### 新增 Job 類型
 
-1. 在 `app/jobs/` 建立新的 job 模組
-2. 實作 async function 執行 job 邏輯
-3. 在 `app/routes/jobs.py` 加入對應的 API endpoint
-4. 更新 `app/jobs/__init__.py`
+ApiOps 使用 **FastAPI BackgroundTasks** 來處理背景任務。
 
-範例：
+📖 **完整指南**: [docs/JOB_DEVELOPMENT_GUIDE.md](docs/JOB_DEVELOPMENT_GUIDE.md)
+📄 **範本檔案**: [app/jobs/_template.py](app/jobs/_template.py)
+
+快速開始：
+
 ```python
 # app/jobs/my_job.py
-async def run_my_job(job_id: str):
+import asyncio
+
+def run_my_job(job_id: str):
+    """同步包裝函數，用於 BackgroundTasks"""
+    asyncio.run(_run_my_job_async(job_id))
+
+async def _run_my_job_async(job_id: str):
+    """實際的 async 邏輯"""
     db = SessionLocal()
     try:
         job = db.query(OpsJob).filter_by(job_id=job_id).one()
         job.status = "running"
         db.commit()
-
         # 執行邏輯...
-
         job.status = "success"
         job.finished_at = now_utc()
         db.commit()
     finally:
         db.close()
+
+# app/routes/jobs.py
+from fastapi import BackgroundTasks
+
+@router.post("/jobs/my-job")
+async def create_my_job(
+    background_tasks: BackgroundTasks,  # ← 注入
+    ...
+):
+    background_tasks.add_task(run_my_job, job_id)  # ← 使用 add_task
+    return {"job_id": job_id}
 ```
 
 ### 新增原子操作
@@ -384,40 +428,45 @@ SELECT * FROM ops_job WHERE status = 'running';
 
 TODO: 加入 Prometheus metrics
 
-## 安全注意事項
+## CLI Tool
 
-1. **API Key 管理**:
-   - 生產環境必須使用強密碼
-   - 定期輪換 API Key
-   - 使用 Vault 或其他 secret 管理工具
+ApiOps 提供 `opsctl` 命令列工具，讓你可以透過終端操作 API。
 
-2. **RBAC 最小權限**:
-   - ServiceAccount 只授予必要的權限
-   - 限制可操作的 namespace
+### 安裝
 
-3. **審計**:
-   - 定期檢查 ops_log
-   - 設定異常操作告警
+```bash
+cd opsctl
+./install.sh
+```
 
-4. **網路隔離**:
-   - API 不應直接暴露在公網
-   - 使用 VPN 或 bastion host 存取
+### 快速開始
+
+```bash
+# 配置
+opsctl config set --api-url http://localhost:8080 --api-key dev-api-key-12345
+
+# 健康檢查
+opsctl health
+
+# Scale deployment
+opsctl scale deployment staging test-app 3
+
+# 建立 PG rebuild job
+opsctl job pg-rebuild -n prod -s test-pg -o 0 -y
+
+# 監控 job（即時更新）
+opsctl job status <job-id> --watch
+```
+
+詳細文件請見：[opsctl/README.md](opsctl/README.md)
 
 ## Roadmap
 
+- [x] CLI tool (opsctl) ✅
 - [ ] 加入更多 Job 類型 (e.g., backup, restore)
 - [ ] Webhook 通知 (Slack, Teams)
 - [ ] Prometheus metrics
 - [ ] Web UI (readonly dashboard)
-- [ ] CLI tool (opsctl)
 - [ ] 支援 dry-run mode
 - [ ] Job 重試機制
 - [ ] 操作審批流程
-
-## License
-
-MIT
-
-## 貢獻
-
-歡迎提交 PR 或開 issue！

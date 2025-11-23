@@ -41,6 +41,8 @@ class OpsJob(Base):
     params = Column(JSON, nullable=False)
     actor = Column(Text, nullable=True)
     source_ip = Column(Text, nullable=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    max_retries = Column(Integer, nullable=False, default=3)
 
 
 class OpsJobStep(Base):

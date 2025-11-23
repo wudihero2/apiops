@@ -13,6 +13,7 @@ class PgRebuildRequest(BaseModel):
     statefulset: str
     ordinal: int
     target_replicas: int = 1
+    max_retries: int = 3
 
 
 class JobStepOut(BaseModel):
@@ -31,4 +32,6 @@ class JobOut(BaseModel):
     created_at: datetime
     finished_at: Optional[datetime]
     params: Dict[str, Any]
+    retry_count: int
+    max_retries: int
     steps: List[JobStepOut]
