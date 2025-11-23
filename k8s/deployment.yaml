@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apiops
+  namespace: ops
+  labels:
+    app: apiops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: apiops
+  template:
+    metadata:
+      labels:
+        app: apiops
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "ops-api"
+        vault.hashicorp.com/agent-inject-secret-api-key: "secret/data/ops-api"
+        vault.hashicorp.com/agent-inject-template-api-key: |
+          {{- with secret "secret/data/ops-api" -}}
+          {{ .Data.data.api_key }}
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-db-url: "secret/data/ops-api-db"
+        vault.hashicorp.com/agent-inject-template-db-url: |
+          {{- with secret "secret/data/ops-api-db" -}}
+          {{ .Data.data.db_url }}
+          {{- end }}
+    spec:
+      serviceAccountName: ops-api-sa
+      containers:
+        - name: apiops
+          image: your-registry/apiops:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENV
+              value: "prod"
+      # Vault Agent sidecar 由 mutating webhook 自己加
