@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import verify_api_key, get_actor, get_source_ip
@@ -66,16 +66,20 @@ async def create_pg_rebuild_job(
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: str, db: Session = Depends(get_db)):
-    job: OpsJob | None = db.query(OpsJob).filter_by(job_id=job_id).first()
+    # SQLAlchemy 2.0 style
+    stmt = select(OpsJob).where(OpsJob.job_id == job_id)
+    job = db.scalar(stmt)
+
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
 
-    steps: List[OpsJobStep] = (
-        db.query(OpsJobStep)
-        .filter_by(job_id=job_id)
+    # Query steps
+    steps_stmt = (
+        select(OpsJobStep)
+        .where(OpsJobStep.job_id == job_id)
         .order_by(OpsJobStep.step_order)
-        .all()
     )
+    steps = list(db.scalars(steps_stmt).all())
 
     return JobOut(
         job_id=job.job_id,
@@ -107,7 +111,9 @@ async def retry_job(
     db: Session = Depends(get_db),
 ):
     """手動重試失敗的 Job"""
-    job: OpsJob | None = db.query(OpsJob).filter_by(job_id=job_id).first()
+    # SQLAlchemy 2.0 style
+    stmt = select(OpsJob).where(OpsJob.job_id == job_id)
+    job = db.scalar(stmt)
 
     if not job:
         raise HTTPException(status_code=404, detail="job not found")

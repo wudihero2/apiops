@@ -3,14 +3,13 @@ API client for communicating with ApiOps
 """
 
 import requests
-from typing import Optional, Dict, Any
 from .config import config
 
 
 class ApiOpsClient:
     """Client for ApiOps API"""
 
-    def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, api_url: str | None = None, api_key: str | None = None):
         self.api_url = (api_url or config.api_url or "").rstrip('/')
         self.api_key = api_key or config.api_key
 
@@ -47,43 +46,43 @@ class ApiOpsClient:
         except requests.exceptions.Timeout:
             raise Exception("Request timeout")
 
-    def get(self, path: str, **kwargs) -> Dict[str, Any]:
+    def get(self, path: str, **kwargs) -> dict[str, any]:
         """GET request"""
         response = self._request('GET', path, **kwargs)
         return response.json()
 
-    def post(self, path: str, **kwargs) -> Dict[str, Any]:
+    def post(self, path: str, **kwargs) -> dict[str, any]:
         """POST request"""
         response = self._request('POST', path, **kwargs)
         return response.json()
 
-    def delete(self, path: str, **kwargs) -> Dict[str, Any]:
+    def delete(self, path: str, **kwargs) -> dict[str, any]:
         """DELETE request"""
         response = self._request('DELETE', path, **kwargs)
         return response.json()
 
     # Health check
-    def health_check(self) -> Dict[str, Any]:
+    def health_check(self) -> dict[str, any]:
         """Check API health"""
         return self.get('/health/live')
 
     # Atomic operations
-    def delete_pod(self, namespace: str, pod_name: str) -> Dict[str, Any]:
+    def delete_pod(self, namespace: str, pod_name: str) -> dict[str, any]:
         """Delete a pod"""
         return self.delete(f'/ops/namespaces/{namespace}/pods/{pod_name}')
 
-    def delete_pvc(self, namespace: str, pvc_name: str) -> Dict[str, Any]:
+    def delete_pvc(self, namespace: str, pvc_name: str) -> dict[str, any]:
         """Delete a PVC"""
         return self.delete(f'/ops/namespaces/{namespace}/persistentvolumeclaims/{pvc_name}')
 
-    def scale_deployment(self, namespace: str, name: str, replicas: int) -> Dict[str, Any]:
+    def scale_deployment(self, namespace: str, name: str, replicas: int) -> dict[str, any]:
         """Scale a deployment"""
         return self.post(
             f'/ops/namespaces/{namespace}/deployments/{name}/scale',
             json={'replicas': replicas}
         )
 
-    def scale_statefulset(self, namespace: str, name: str, replicas: int) -> Dict[str, Any]:
+    def scale_statefulset(self, namespace: str, name: str, replicas: int) -> dict[str, any]:
         """Scale a statefulset"""
         return self.post(
             f'/ops/namespaces/{namespace}/statefulsets/{name}/scale',
@@ -98,7 +97,7 @@ class ApiOpsClient:
         ordinal: int,
         target_replicas: int = 1,
         max_retries: int = 3
-    ) -> Dict[str, Any]:
+    ) -> dict[str, any]:
         """Create a PG rebuild job"""
         return self.post(
             '/ops/jobs/pg-rebuild',
@@ -111,10 +110,10 @@ class ApiOpsClient:
             }
         )
 
-    def get_job(self, job_id: str) -> Dict[str, Any]:
+    def get_job(self, job_id: str) -> dict[str, any]:
         """Get job status"""
         return self.get(f'/ops/jobs/{job_id}')
 
-    def retry_job(self, job_id: str) -> Dict[str, Any]:
+    def retry_job(self, job_id: str) -> dict[str, any]:
         """Manually retry a failed job"""
         return self.post(f'/ops/jobs/{job_id}/retry')

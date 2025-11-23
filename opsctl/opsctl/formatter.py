@@ -9,7 +9,6 @@ from rich.syntax import Syntax
 from rich import box
 import json
 from datetime import datetime
-from typing import Any, Dict, List
 
 
 console = Console()
@@ -35,7 +34,7 @@ def print_info(message: str):
     console.print(f"[blue]ℹ[/blue] {message}")
 
 
-def print_json(data: Any, title: str = None):
+def print_json(data: any, title: str | None = None):
     """Print JSON data"""
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
@@ -46,7 +45,7 @@ def print_json(data: Any, title: str = None):
         console.print(syntax)
 
 
-def print_job_status(job: Dict[str, Any]):
+def print_job_status(job: dict[str, any]):
     """Print job status in a formatted way"""
     # Status color
     status_colors = {
@@ -143,7 +142,7 @@ def calculate_duration(start: str, end: str) -> str:
         return "-"
 
 
-def print_operation_result(result: Dict[str, Any], operation: str):
+def print_operation_result(result: dict[str, any], operation: str):
     """Print operation result"""
     if result.get('status') == 'ok':
         print_success(f"{operation} completed successfully")

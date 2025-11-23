@@ -1,5 +1,3 @@
-from typing import Any, Dict, Optional
-
 from fastapi import Request
 from sqlalchemy.orm import Session
 
@@ -15,9 +13,9 @@ def safe_log_op(
     resource_kind: str,
     namespace: str,
     resource_name: str,
-    request_body: Optional[Dict[str, Any]],
+    request_body: dict[str, any] | None,
     status: str,
-    error_message: Optional[str] = None,
+    error_message: str | None = None,
 ):
     try:
         log = OpsLog(

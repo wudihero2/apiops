@@ -5,7 +5,6 @@ Configuration management for opsctl
 import os
 import yaml
 from pathlib import Path
-from typing import Optional
 
 
 class Config:
@@ -14,7 +13,7 @@ class Config:
     def __init__(self):
         self.config_dir = Path.home() / ".opsctl"
         self.config_file = self.config_dir / "config.yaml"
-        self._config = None
+        self._config: dict | None = None
 
     def ensure_config_dir(self):
         """Ensure config directory exists"""
@@ -47,24 +46,24 @@ class Config:
             yaml.dump(config, f, default_flow_style=False)
         self._config = config
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default: any = None):
         """Get configuration value"""
         config = self.load()
         return config.get(key, default)
 
-    def set(self, key: str, value):
+    def set(self, key: str, value: any):
         """Set configuration value"""
         config = self.load()
         config[key] = value
         self.save(config)
 
     @property
-    def api_url(self) -> Optional[str]:
+    def api_url(self) -> str | None:
         """Get API URL"""
         return self.get('api_url')
 
     @property
-    def api_key(self) -> Optional[str]:
+    def api_key(self) -> str | None:
         """Get API Key"""
         return self.get('api_key')
 
